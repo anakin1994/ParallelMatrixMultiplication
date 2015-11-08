@@ -6,11 +6,13 @@
 #include <iostream>
 #include <time.h>
 #include <omp.h>
+#include <string>
+#include <sstream>
 
 using namespace std;
 
 
-#define N 500
+#define N 1000
 #define RUNS 50
 
 //global declarations
@@ -75,7 +77,7 @@ time_t multiplyMatriciesSeq()
 	return stop - start;
 }
 
-time_t multiplyMatriciesPar1()
+time_t multiplyMatriciesPar1(int chunk)
 {
 	//declare clocks
 	clock_t start, stop;
@@ -89,7 +91,7 @@ time_t multiplyMatriciesPar1()
 		// init loop variables
 		int i, j, k;
 		//multiply a and b and store the result in c
-#pragma omp for
+#pragma omp for schedule(guided, chunk)
 		for (j = 0; j < N; j++) {
 			for (i = 0; i < N; i++) {
 				for (k = 0; k < N; k++) {
@@ -107,7 +109,7 @@ time_t multiplyMatriciesPar1()
 	return stop - start;
 }
 
-time_t multiplyMatriciesPar2()
+time_t multiplyMatriciesPar2(int chunk)
 {
 	//declare clocks
 	clock_t start, stop;
@@ -123,7 +125,7 @@ time_t multiplyMatriciesPar2()
 
 		//multiply a and b and store the result in c
 		for (j = 0; j < N; j++) {
-#pragma omp for
+#pragma omp for schedule(guided, chunk)
 			for (i = 0; i < N; i++) {
 				for (k = 0; k < N; k++) {
 					c3[i][j] += a[i][k] * b[k][j];
@@ -140,7 +142,7 @@ time_t multiplyMatriciesPar2()
 	return stop - start;
 }
 
-time_t multiplyMatriciesPar3()
+time_t multiplyMatriciesPar3(int chunk)
 {
 	//declare clocks
 	clock_t start, stop;
@@ -157,7 +159,7 @@ time_t multiplyMatriciesPar3()
 		//multiply a and b and store the result in c
 		for (j = 0; j < N; j++) {
 			for (i = 0; i < N; i++) {
-#pragma omp for
+#pragma omp for schedule(guided, chunk)
 				for (k = 0; k < N; k++) {
 					c4[i][j] += a[i][k] * b[k][j];
 				}
@@ -186,62 +188,73 @@ void printMatrix(float m[N][N]) {
 
 int main()
 {
-	FILE *result_file;
-	if ((fopen_s(&result_file, "results.csv", "a")) != 0) {
-		fprintf(stderr, "nie mozna otworzyc pliku wyniku \n");
-		perror("classic");
-		return(EXIT_FAILURE);
-	}
-
-	time_t times[RUNS][4];
-	for (int i = 0; i < RUNS; i++)
+	for (int chunk = 1; chunk <= N; chunk *= 2)
 	{
-		resetMatricies();
-		//fill matrices with random numbers [0;1]
-		for (int i = 0; i < N; i++) {
-			for (int j = 0; j < N; j++) {
-				a[i][j] = (float)rand() / (RAND_MAX);
-				b[i][j] = (float)rand() / (RAND_MAX);
-			}
+		ostringstream ss;
+		ss.flush();
+		ss << "results_chunk_" << chunk << ".csv";
+		string fileName = ss.str();
+		cout << "chunk: " << chunk << endl;
+		cout << fileName << endl;
+		const char * charFileName = fileName.c_str();
+
+		FILE *result_file;
+		if ((fopen_s(&result_file, charFileName, "a")) != 0) {
+			fprintf(stderr, "nie mozna otworzyc pliku wyniku \n");
+			perror("classic");
+			return(EXIT_FAILURE);
 		}
 
-		times[i][0] = multiplyMatriciesSeq();
-		fprintf(result_file, "%d;", times[i][0]);
+		time_t times[RUNS][4];
+		for (int i = 0; i < RUNS; i++)
+		{
+			resetMatricies();
+			//fill matrices with random numbers [0;1]
+			for (int i = 0; i < N; i++) {
+				for (int j = 0; j < N; j++) {
+					a[i][j] = (float)rand() / (RAND_MAX);
+					b[i][j] = (float)rand() / (RAND_MAX);
+				}
+			}
 
-		times[i][1] = multiplyMatriciesPar1();
-		fprintf(result_file, "%d;", times[i][1]);
-		checkTheSame(c1, c2);
+			times[i][0] = multiplyMatriciesSeq();
+			fprintf(result_file, "%d;", times[i][0]);
 
-		times[i][2] = multiplyMatriciesPar2();
-		fprintf(result_file, "%d;", times[i][2]);
-		checkTheSame(c1, c3);
+			times[i][1] = multiplyMatriciesPar1(chunk);
+			fprintf(result_file, "%d;", times[i][1]);
+			checkTheSame(c1, c2);
 
-		times[i][3] = multiplyMatriciesPar3();
-		fprintf(result_file, "%d\n", times[i][3]);
-		checkTheSame(c1, c4);
+			times[i][2] = multiplyMatriciesPar2(chunk);
+			fprintf(result_file, "%d;", times[i][2]);
+			checkTheSame(c1, c3);
 
+			times[i][3] = multiplyMatriciesPar3(chunk);
+			fprintf(result_file, "%d\n", times[i][3]);
+			checkTheSame(c1, c4);
+
+		}
+
+		//Count average times
+		double  t0 = 0, t1 = 0, t2 = 0, t3 = 0;
+		for (int i = 0; i < RUNS; i++)
+		{
+
+			t0 += times[i][0];
+			t1 += times[i][1];
+			t2 += times[i][2];
+			t3 += times[i][3];
+		}
+		t0 /= (double)RUNS;
+		cout << "Sredni czas przetwarzania sekwencyjnego: " << t0 / 1000.0 << " sekund" << endl;
+		t1 /= (double)RUNS;
+		cout << "Sredni czas przetwarzania rownoleglego1 : " << t1 / 1000.0 << " sekund" << endl;
+		t2 /= (double)RUNS;
+		cout << "Sredni czas przetwarzania rownoleglego2 : " << t2 / 1000.0 << " sekund" << endl;
+		t3 /= (double)RUNS;
+		cout << "Sredni czas przetwarzania rownoleglego3 : " << t3 / 1000.0 << " sekund" << endl;
+
+		fclose(result_file);
 	}
-
-	//Count average times
-	double  t0 = 0, t1 = 0, t2 = 0, t3 = 0;
-	for (int i = 0; i < RUNS; i++)
-	{
-
-		t0 += times[i][0];
-		t1 += times[i][1];
-		t2 += times[i][2];
-		t3 += times[i][3];
-	}
-	t0 /= (double)RUNS;
-	cout << "Sredni czas przetwarzania sekwencyjnego: " << t0 / 1000.0 << " sekund" << endl;
-	t1 /= (double)RUNS;
-	cout << "Sredni czas przetwarzania rownoleglego1 : " << t1 / 1000.0 << " sekund" << endl;
-	t2 /= (double)RUNS;
-	cout << "Sredni czas przetwarzania rownoleglego2 : " << t2 / 1000.0 << " sekund" << endl;
-	t3 /= (double)RUNS;
-	cout << "Sredni czas przetwarzania rownoleglego3 : " << t3 / 1000.0 << " sekund" << endl;
-
-	fclose(result_file);
 
 	system("pause");
 	return 0;
